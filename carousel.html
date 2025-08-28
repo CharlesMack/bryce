@@ -1,0 +1,366 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Bryce Hologram Media Hub — Offline First</title>
+<meta name="description" content="Fully offline, no‑auto‑rotate holographic media hub with multi‑panel playback, drag/zoom controls, screensaver mode, voice quips, projector hum, and state persistence (pops_bryce.*)." />
+<style>
+  /* ===================== THEME TOKENS ===================== */
+  :root{
+    --ink:#e7ebff; --muted:#9aa6d6; --bg:#0a0b12; --panel:#0f1220; --edge:#1a2140;
+    --accent:#6cf5ff; --accent2:#c28bff; --good:#6cff9a; --warn:#ffd36c; --danger:#ff6c9a;
+    --scanline:rgba(255,255,255,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:radial-gradient(1400px 700px at 60% -20%,#1c2344 0%,#0a0b12 60%);
+       color:var(--ink);font:14px/1.45 system-ui,Segoe UI,Inter,Roboto,sans-serif;overflow:hidden}
+
+  /* ===================== PANEL SHELL ===================== */
+  .panel{position:relative;max-width:1200px;margin:14px auto;border:1px solid var(--edge);
+    border-radius:16px;background:linear-gradient(180deg,rgba(18,22,42,.75),rgba(12,14,26,.85));
+    box-shadow:0 20px 80px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.05);overflow:clip}
+  .hud{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:10px 12px;
+    border-bottom:1px solid var(--edge);background:rgba(10,12,24,.5);backdrop-filter:blur(6px)}
+  .hud .title{font-weight:600;letter-spacing:.25px}
+  .hud .clock{justify-self:center;color:var(--muted);font-variant-numeric:tabular-nums}
+  .hud .chip{justify-self:end;padding:6px 10px;border:1px solid #274;border-radius:999px;
+    background:linear-gradient(180deg,rgba(20,40,34,.6),rgba(14,22,20,.6));color:var(--good);font-size:12px}
+
+  /* ===================== 3D STAGE ===================== */
+  .stage-wrap{position:relative;aspect-ratio:16/9;min-height:420px;background:radial-gradient(60% 100% at 50% 120%, rgba(108,245,255,.15), transparent 60%),
+               radial-gradient(60% 100% at 50% 120%, rgba(194,139,255,.12), transparent 70%), #0b0e18}
+  .stage{position:absolute;inset:0;display:grid;place-items:center;perspective:1200px;overflow:hidden}
+
+  /* Starfield canvas (simple, cheap) */
+  #stars{position:absolute;inset:0;pointer-events:none;opacity:.7;mix-blend-mode:screen}
+
+  /* Camera + Universe groups for CSS 3D */
+  .camera{position:absolute;inset:0;transform-style:preserve-3d}
+  .universe{position:absolute;left:50%;top:50%;transform-style:preserve-3d}
+
+  /* Projector + beam */
+  .beam{position:absolute;left:50%;bottom:8%;transform:translateX(-50%);
+    width:52%;height:32%;pointer-events:none;
+    background:radial-gradient(ellipse at center, rgba(108,245,255,.35), rgba(108,245,255,0) 60%),
+               radial-gradient(ellipse at center, rgba(194,139,255,.25), rgba(194,139,255,0) 70%);
+    filter:blur(8px) saturate(120%)}
+  .projector{position:absolute;left:50%;bottom:3%;transform:translateX(-50%);
+    width:360px;max-width:60%;height:44px;border:1px solid var(--edge);border-radius:14px;
+    background:linear-gradient(180deg,#0e1222,#0a0c18);box-shadow:0 10px 30px rgba(0,0,0,.5),
+    0 0 24px rgba(108,245,255,.12),0 0 36px rgba(194,139,255,.10) inset}
+  .projector::after{content:"";position:absolute;inset:4px;border-radius:12px;border:1px dashed rgba(108,245,255,.25)}
+
+  /* Scanlines overlay */
+  .scanlines{position:absolute;inset:0;pointer-events:none;opacity:.55;mix-blend-mode:screen;
+    background-image:repeating-linear-gradient(to bottom, transparent 0 2px, var(--scanline) 2px 3px)}
+  .scanlines.off{display:none}
+
+  /* =============== HOLOGRAPHIC CUBE (pure CSS 3D) =============== */
+  .holo{position:absolute;width:260px;height:260px;transform-style:preserve-3d;
+    filter:drop-shadow(0 0 16px rgba(108,245,255,.35)) drop-shadow(0 0 28px rgba(194,139,255,.25))}
+  .holo.glow{filter:drop-shadow(0 0 24px rgba(108,245,255,.6)) drop-shadow(0 0 42px rgba(194,139,255,.45))}
+  .face{position:absolute;inset:0;background:linear-gradient(180deg, rgba(108,245,255,.20), rgba(194,139,255,.06));
+    border:1px solid rgba(108,245,255,.45);box-shadow:inset 0 0 28px rgba(194,139,255,.22);
+    backdrop-filter:blur(1.5px) saturate(120%);display:grid;place-items:center;overflow:hidden}
+  .front{transform:translateZ(130px)}
+  .back{transform:rotateY(180deg) translateZ(130px)}
+  .right{transform:rotateY(90deg) translateZ(130px)}
+  .left{transform:rotateY(-90deg) translateZ(130px)}
+  .top{transform:rotateX(90deg) translateZ(130px)}
+  .bottom{transform:rotateX(-90deg) translateZ(130px)}
+
+  /* Media inside the front face */
+  .media{width:100%;height:100%;object-fit:cover;display:block}
+  .media.canvas{image-rendering:auto}
+  .label{position:absolute;bottom:6px;left:8px;padding:2px 6px;border-radius:6px;font-size:11px;
+    background:rgba(8,10,20,.65);border:1px solid rgba(108,245,255,.35);color:var(--ink)}
+
+  /* Selected highlight */
+  .holo[data-selected="1"] .face{border-color:rgba(255,255,255,.8)}
+
+  /* =============== CONTROLS =============== */
+  .controls{display:flex;flex-wrap:wrap;gap:10px;padding:12px;border-top:1px solid var(--edge);
+    background:linear-gradient(180deg, rgba(11,14,24,.6), rgba(9,10,16,.8))}
+  .group{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--edge);border-radius:12px;background:#0e1222}
+  label{color:var(--muted);font-size:12px}
+  .kbd{padding:2px 6px;border:1px solid var(--edge);border-radius:6px;background:#0b0e18;font-size:11px;color:var(--muted)}
+  .hint{margin-left:auto;color:var(--muted);font-size:12px}
+  button,.toggle{appearance:none;border:1px solid var(--edge);background:linear-gradient(180deg,#142036,#0e1222);
+    color:var(--ink);padding:8px 10px;border-radius:10px;cursor:pointer}
+  button.primary,.toggle.active{border-color:rgba(108,245,255,.6);box-shadow:0 0 0 1px rgba(108,245,255,.2) inset,0 0 20px rgba(108,245,255,.15)}
+  select{background:#0e1222;color:var(--ink);border:1px solid var(--edge);border-radius:10px;padding:6px 8px}
+  input[type="range"]{width:160px}
+
+  /* Drag & Drop overlay */
+  .drop{position:absolute;inset:0;display:none;place-items:center;background:rgba(10,12,24,.75);
+    border:2px dashed rgba(108,245,255,.35);color:var(--ink);font-size:18px;z-index:5}
+  .drop.show{display:grid}
+
+  /* Accessibility helpers */
+  .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;clip:rect(0 0 0 0);overflow:hidden}
+</style>
+</head>
+<body>
+  <main class="panel" aria-label="Bryce Hologram Media Hub">
+    <header class="hud">
+      <div class="title">Bryce Holograms <span style="color:var(--muted)">• Personal 3D Media Hub</span></div>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="chip" id="chip">mode: <strong>manual</strong></div>
+    </header>
+
+    <section class="stage-wrap">
+      <div class="stage" id="stage" aria-live="polite">
+        <canvas id="stars"></canvas>
+        <div id="scanlines" class="scanlines"></div>
+        <div class="camera" id="camera">
+          <div class="universe" id="universe"></div>
+        </div>
+        <div class="beam"></div>
+        <div class="projector" aria-hidden="true"></div>
+        <div class="drop" id="drop">Drop files to add panels</div>
+      </div>
+    </section>
+
+    <section class="controls" aria-label="Controls">
+      <div class="group">
+        <button id="btnScreensaver" class="toggle" aria-pressed="false">Screensaver Mode <span class="kbd">Space</span></button>
+        <label for="speed">Speed</label>
+        <input id="speed" type="range" min="0" max="0.12" step="0.002" value="0.02" />
+      </div>
+      <div class="group">
+        <input id="picker" type="file" accept="image/*,video/*,audio/*,text/plain,application/pdf" multiple class="sr-only" />
+        <button id="btnAdd" class="primary">+ Add Media</button>
+        <button id="btnPlayAll">Play All</button>
+        <button id="btnPauseAll">Pause All</button>
+        <button id="btnUnmuteAll">Unmute All</button>
+        <button id="btnRemove">Remove Selected</button>
+      </div>
+      <div class="group">
+        <button id="btnGlow" class="toggle active">Glow <span class="kbd">G</span></button>
+        <button id="btnScan" class="toggle active">Scanlines <span class="kbd">S</span></button>
+        <label for="layer">Layer</label>
+        <select id="layer">
+          <option value="none">None</option>
+          <option value="cinema">Cinema</option>
+          <option value="noir">Noir</option>
+          <option value="pop">Pop</option>
+        </select>
+      </div>
+      <div class="group">
+        <button id="btnSpeak" class="toggle">Voice</button>
+        <button id="btnQuip">Say hi</button>
+        <button id="btnHum" class="toggle">Projector hum</button>
+      </div>
+      <div class="group">
+        <button id="btnFocus">Focus Selected</button>
+        <button id="btnResetView">Reset View</button>
+      </div>
+      <div class="hint">Drag background to rotate • Wheel to zoom • Double‑click panel to select</div>
+    </section>
+  </main>
+
+<script>
+/******************* STATE *******************/
+const NS = 'pops_bryce.mediahub';
+const state = {
+  rx: -12, ry: 18, zoom: -1200,
+  rotating: false, rotationSpeed: 0.02,
+  glow: true, scanlines: true, layer: 'none',
+  speak: false, hum: false,
+  selectedId: null,
+  panels: [] // {id, el, mediaEl, kind}
+};
+function save(){ localStorage.setItem(NS, JSON.stringify({rx:state.rx, ry:state.ry, zoom:state.zoom, rotating:state.rotating, rotationSpeed:state.rotationSpeed, glow:state.glow, scanlines:state.scanlines, layer:state.layer, speak:state.speak, hum:state.hum})); }
+function load(){ try{ Object.assign(state, JSON.parse(localStorage.getItem(NS)||'{}')); }catch{} }
+load();
+
+/******************* EL REFS *******************/
+const stage = document.getElementById('stage');
+const camera = document.getElementById('camera');
+const universe = document.getElementById('universe');
+const scan = document.getElementById('scanlines');
+const clockEl = document.getElementById('clock');
+const chip = document.getElementById('chip');
+const stars = document.getElementById('stars');
+const drop = document.getElementById('drop');
+
+const btnScreensaver = document.getElementById('btnScreensaver');
+const speed = document.getElementById('speed');
+const btnAdd = document.getElementById('btnAdd');
+const picker = document.getElementById('picker');
+const btnPlayAll = document.getElementById('btnPlayAll');
+const btnPauseAll = document.getElementById('btnPauseAll');
+const btnUnmuteAll = document.getElementById('btnUnmuteAll');
+const btnRemove = document.getElementById('btnRemove');
+const btnGlow = document.getElementById('btnGlow');
+const btnScan = document.getElementById('btnScan');
+const layerSel = document.getElementById('layer');
+const btnSpeak = document.getElementById('btnSpeak');
+const btnQuip = document.getElementById('btnQuip');
+const btnHum = document.getElementById('btnHum');
+const btnFocus = document.getElementById('btnFocus');
+const btnResetView = document.getElementById('btnResetView');
+
+/******************* HUD *******************/
+function tickClock(){ const d=new Date(); const p=n=>String(n).padStart(2,'0'); clockEl.textContent=`${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+setInterval(tickClock,1000); tickClock();
+function updateChip(){ chip.innerHTML = `mode: <strong>${state.rotating?'screensaver':'manual'}</strong>`; }
+
+/******************* LAYERS/FILTERS *******************/
+function applyLayer(){ const wrap=document.querySelector('.stage-wrap'); wrap.style.filter='none';
+  switch(state.layer){
+    case 'cinema': wrap.style.filter='contrast(1.08) saturate(1.1) brightness(1.02)'; break;
+    case 'noir': wrap.style.filter='grayscale(1) contrast(1.2) brightness(1.05)'; break;
+    case 'pop': wrap.style.filter='saturate(1.35) contrast(1.05)'; break;
+  }
+}
+
+/******************* STARFIELD (cheap) *******************/
+function drawStars(){ const w=stars.width=stage.clientWidth, h=stars.height=stage.clientHeight; const ctx=stars.getContext('2d'); ctx.clearRect(0,0,w,h);
+  for(let i=0;i<350;i++){ const x=Math.random()*w, y=Math.random()*h, r=Math.random()*1.2+0.2; ctx.fillStyle=`rgba(${200+Math.random()*55},${220+Math.random()*35},255,${Math.random()*0.9})`; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); }
+}
+
+/******************* 3D CAMERA + LOOP *******************/
+function updateCamera(){ camera.style.transform = `translateZ(${state.zoom}px) rotateX(${state.rx}deg) rotateY(${state.ry}deg)`; }
+let last=performance.now();
+function loop(t){ requestAnimationFrame(loop); const dt=(t-last)/1000; last=t; if(state.rotating){ universeRotY += state.rotationSpeed*360*dt; updateUniverse(); }
+}
+
+/******************* UNIVERSE & LAYOUT *******************/
+let universeRotY = 0;
+function updateUniverse(){ universe.style.transform = `translate3d(-50%,-50%,0) rotateY(${universeRotY}deg)`; }
+function layoutPanels(){ const n=state.panels.length; const R=800; const elev=0; // ring
+  state.panels.forEach((p,i)=>{ const a=(i/n)*Math.PI*2; const x=Math.cos(a)*R; const z=Math.sin(a)*R; p.el.style.transform = `translate3d(${-130}px,${-130}px,0) rotateY(${-universeRotY}deg)`; // cancel world rot for crisp faces
+    p.el.style.left = '50%'; p.el.style.top='50%'; p.el.style.margin='0'; p.el.style.position='absolute';
+    p.el.style.transform += ` translate3d(${x}px, ${elev}px, ${z}px)`; });
+}
+
+/******************* PANEL FACTORY *******************/
+function makeCube(){ const cube=document.createElement('div'); cube.className='holo'+(state.glow?' glow':'');
+  const faces=['front','back','right','left','top','bottom'];
+  faces.forEach(cls=>{ const f=document.createElement('div'); f.className='face '+cls; cube.appendChild(f); });
+  return cube; }
+
+function addPanelFromFile(file){
+  const id=crypto.randomUUID(); const cube=makeCube(); cube.dataset.id=id; cube.tabIndex=0;
+  const front=cube.querySelector('.front');
+  let mediaEl=null, kind='unknown';
+  const url=URL.createObjectURL(file);
+  if(file.type.startsWith('image/')){ kind='image'; const img=new Image(); img.className='media'; img.onload=()=>URL.revokeObjectURL(url); img.src=url; front.appendChild(img);
+  }
+  else if(file.type.startsWith('video/')){ kind='video'; const vid=document.createElement('video'); Object.assign(vid,{className:'media',src:url,loop:true,playsInline:true,controls:true,muted:true}); front.appendChild(vid); mediaEl=vid; }
+  else if(file.type.startsWith('audio/')){ kind='audio'; const wrap=document.createElement('div'); wrap.style.width='100%'; wrap.style.height='100%'; wrap.style.display='grid'; wrap.style.placeItems='center';
+    const canvas=document.createElement('canvas'); canvas.width=512; canvas.height=256; canvas.className='media canvas'; wrap.appendChild(canvas);
+    const aud=document.createElement('audio'); Object.assign(aud,{src:url,loop:true,controls:true,style:'position:absolute;left:6px;right:6px;bottom:6px;width:calc(100% - 12px)'});
+    front.appendChild(wrap); front.appendChild(aud); mediaEl=aud; startWaveform(aud,canvas); }
+  else if(file.type==='text/plain'){ kind='text'; const canvas=document.createElement('canvas'); canvas.width=512; canvas.height=512; canvas.className='media canvas'; front.appendChild(canvas); file.text().then(txt=>renderTextToCanvas(canvas, txt)); }
+  else if(file.type==='application/pdf'){ kind='pdf'; const a=document.createElement('a'); a.href=url; a.target='_blank'; a.textContent='Open PDF'; a.className='label'; front.appendChild(a); }
+  else { const a=document.createElement('a'); a.href=url; a.target='_blank'; a.textContent='Open'; a.className='label'; front.appendChild(a); }
+  const lab=document.createElement('div'); lab.className='label'; lab.textContent=file.name; front.appendChild(lab);
+
+  // Select on double‑click
+  cube.addEventListener('dblclick',()=>selectPanel(id));
+  cube.addEventListener('keydown',e=>{ if(e.key==='Enter'){ selectPanel(id); }});
+
+  universe.appendChild(cube);
+  const panel={id, el:cube, mediaEl, kind}; state.panels.push(panel); layoutPanels(); return panel;
+}
+
+/******************* TEXT & AUDIO HELPERS *******************/
+function renderTextToCanvas(cv, txt){ const ctx=cv.getContext('2d'); ctx.fillStyle='#0c0f1c'; ctx.fillRect(0,0,cv.width,cv.height);
+  ctx.fillStyle='#e7ebff'; ctx.font='18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  const pad=16, maxW=cv.width-2*pad, lineH=22; const words=txt.split(/\s+/); let x=pad,y=pad+20,line='';
+  for(const w of words){ const test=line+w+' '; if(ctx.measureText(test).width>maxW){ ctx.fillText(line,x,y); line=w+' '; y+=lineH; if(y>cv.height-pad) break; } else { line=test; } }
+  if(y<=cv.height-pad) ctx.fillText(line,x,y);
+}
+
+let AC=null; function ensureAC(){ if(!AC) AC=new (window.AudioContext||window.webkitAudioContext)(); return AC; }
+function startWaveform(aud, canvas){ const ac=ensureAC(); const src=ac.createMediaElementSource(aud); const analyser=ac.createAnalyser(); analyser.fftSize=1024; src.connect(analyser); src.connect(ac.destination);
+  const buf=new Uint8Array(analyser.frequencyBinCount); const ctx=canvas.getContext('2d');
+  function draw(){ requestAnimationFrame(draw); analyser.getByteFrequencyData(buf); ctx.clearRect(0,0,canvas.width,canvas.height);
+    // bars
+    const n=120, step=Math.floor(buf.length/n); const w=canvas.width/n, h=canvas.height;
+    for(let i=0;i<n;i++){ const v=buf[i*step]/255; const bh=v*h; ctx.fillStyle=`rgba(108,245,255,${0.35+0.65*v})`; ctx.fillRect(i*w, h-bh, w*0.9, bh); }
+  }
+  draw();
+}
+
+/******************* SELECTION + ACTIONS *******************/
+function selectPanel(id){ state.selectedId=id; document.querySelectorAll('.holo').forEach(el=>el.dataset.selected = (el.dataset.id===id?'1':'0')); }
+function removeSelected(){ if(!state.selectedId) return; const idx=state.panels.findIndex(p=>p.id===state.selectedId); if(idx<0) return; const [p]=state.panels.splice(idx,1); p.el.remove(); state.selectedId=null; layoutPanels(); }
+
+function playAll(){ state.panels.forEach(p=>{ if(p.kind==='video'&&p.mediaEl) p.mediaEl.play(); if(p.kind==='audio'&&p.mediaEl) p.mediaEl.play(); }); }
+function pauseAll(){ state.panels.forEach(p=>{ if(p.kind==='video'&&p.mediaEl) p.mediaEl.pause(); if(p.kind==='audio'&&p.mediaEl) p.mediaEl.pause(); }); }
+function unmuteAll(){ state.panels.forEach(p=>{ if(p.mediaEl && 'muted' in p.mediaEl){ p.mediaEl.muted=false; } }); ensureAC(); }
+
+function focusSelected(){ if(!state.selectedId||state.panels.length===0) return; const i=state.panels.findIndex(p=>p.id===state.selectedId); if(i<0) return; const step=360/state.panels.length; const target = -i*step; animateToUniverseY(target); }
+function animateToUniverseY(target){ const start=universeRotY; const dur=500; const t0=performance.now(); function anim(t){ const k=Math.min(1,(t-t0)/dur); const e=0.5-0.5*Math.cos(Math.PI*k); universeRotY=start+(target-start)*e; updateUniverse(); if(k<1) requestAnimationFrame(anim); } requestAnimationFrame(anim); }
+
+/******************* INPUTS: DRAG ROTATE + ZOOM *******************/
+let dragging=false, px=0, py=0, srx=state.rx, sry=state.ry;
+stage.addEventListener('pointerdown',e=>{ if(e.target.closest('.holo')) return; dragging=true; px=e.clientX; py=e.clientY; srx=state.rx; sry=state.ry; stage.setPointerCapture?.(e.pointerId); });
+stage.addEventListener('pointermove',e=>{ if(!dragging) return; state.ry = sry + (e.clientX - px)*0.12; state.rx = srx - (e.clientY - py)*0.12; updateCamera(); save(); });
+stage.addEventListener('pointerup',()=>dragging=false);
+stage.addEventListener('wheel',e=>{ e.preventDefault(); state.zoom = Math.max(-2500, Math.min(-600, state.zoom + (e.deltaY>0?-60:60))); updateCamera(); save(); }, {passive:false});
+
+/******************* VOICE + HUM *******************/
+let humGain=null; function ensureHum(){ const ac=ensureAC(); if(!humGain){ humGain=ac.createGain(); humGain.gain.value=0.0; humGain.connect(ac.destination); const osc=ac.createOscillator(); osc.type='sawtooth'; const low=ac.createBiquadFilter(); low.type='lowpass'; low.frequency.value=220; const lfo=ac.createOscillator(); lfo.frequency.value=17; const lfoGain=ac.createGain(); lfoGain.gain.value=6; lfo.connect(lfoGain).connect(low.detune); osc.connect(low).connect(humGain); osc.start(); lfo.start(); } }
+function setHum(on){ ensureHum(); const ac=ensureAC(); const now=ac.currentTime; humGain.gain.cancelScheduledValues(now); humGain.gain.linearRampToValueAtTime(on?0.08:0.0, now+0.25); }
+function quip(){ if(!state.speak) return; const s=new SpeechSynthesisUtterance(); s.text=['Lightfield calibrated.','Guide online.','Welcome back, Bryce.','Screensaver ready on your mark.'][Math.floor(Math.random()*4)]; s.rate=1.0; s.pitch=1.05; s.onstart=()=>{ if(state.hum && humGain){ const ac=ensureAC(); humGain.gain.linearRampToValueAtTime(0.015, ac.currentTime+0.05); } }; s.onend=()=>{ if(state.hum && humGain){ const ac=ensureAC(); humGain.gain.linearRampToValueAtTime(0.08, ac.currentTime+0.05); } }; speechSynthesis.speak(s); }
+
+/******************* DND + PICKER *******************/
+;['dragenter','dragover'].forEach(evt=>stage.addEventListener(evt,e=>{e.preventDefault(); drop.classList.add('show');}));
+;['dragleave','drop'].forEach(evt=>stage.addEventListener(evt,e=>{e.preventDefault(); if(!stage.contains(e.relatedTarget)) drop.classList.remove('show');}));
+stage.addEventListener('drop',e=>{ const files=[...e.dataTransfer.files]; files.forEach(addPanelFromFile); drop.classList.remove('show'); });
+
+/******************* UI WIRE-UP *******************/
+function boot(){
+  // apply saved
+  scan.classList.toggle('off', !state.scanlines); btnScan.classList.toggle('active', state.scanlines);
+  document.querySelectorAll('.holo').forEach(h=>h.classList.toggle('glow', state.glow)); btnGlow.classList.toggle('active', state.glow);
+  btnScreensaver.classList.toggle('active', state.rotating); btnScreensaver.setAttribute('aria-pressed', String(state.rotating));
+  speed.value=state.rotationSpeed; layerSel.value=state.layer; applyLayer(); updateCamera(); updateUniverse(); updateChip(); drawStars();
+  window.addEventListener('resize', drawStars, {passive:true});
+  requestAnimationFrame(loop);
+}
+
+btnScreensaver.addEventListener('click',()=>{ state.rotating=!state.rotating; btnScreensaver.classList.toggle('active', state.rotating); btnScreensaver.setAttribute('aria-pressed', String(state.rotating)); updateChip(); save(); });
+speed.addEventListener('input',()=>{ state.rotationSpeed=parseFloat(speed.value); save(); });
+
+btnAdd.addEventListener('click',()=>picker.click());
+picker.addEventListener('change',()=>{ [...picker.files].forEach(addPanelFromFile); picker.value=''; });
+
+btnPlayAll.addEventListener('click',()=>{ ensureAC(); playAll(); });
+btnPauseAll.addEventListener('click',()=>pauseAll());
+btnUnmuteAll.addEventListener('click',()=>{ unmuteAll(); });
+btnRemove.addEventListener('click',removeSelected);
+
+btnGlow.addEventListener('click',()=>{ state.glow=!state.glow; document.querySelectorAll('.holo').forEach(h=>h.classList.toggle('glow', state.glow)); btnGlow.classList.toggle('active', state.glow); save(); });
+btnScan.addEventListener('click',()=>{ state.scanlines=!state.scanlines; scan.classList.toggle('off', !state.scanlines); btnScan.classList.toggle('active', state.scanlines); save(); });
+layerSel.addEventListener('change',()=>{ state.layer=layerSel.value; applyLayer(); save(); });
+
+btnSpeak.addEventListener('click',()=>{ state.speak=!state.speak; btnSpeak.classList.toggle('active', state.speak); save(); });
+btnQuip.addEventListener('click',()=>{ ensureAC(); quip(); });
+btnHum.addEventListener('click',()=>{ state.hum=!state.hum; btnHum.classList.toggle('active', state.hum); ensureHum(); setHum(state.hum); save(); });
+
+btnFocus.addEventListener('click',focusSelected);
+btnResetView.addEventListener('click',()=>{ state.rx=-12; state.ry=18; state.zoom=-1200; updateCamera(); save(); });
+
+window.addEventListener('keydown',e=>{
+  if(e.key===' '){ e.preventDefault(); btnScreensaver.click(); }
+  else if(e.key.toLowerCase()==='g'){ btnGlow.click(); }
+  else if(e.key.toLowerCase()==='s'){ btnScan.click(); }
+  else if(e.key==='+'){ state.rotationSpeed=Math.min(0.12, state.rotationSpeed+0.004); speed.value=state.rotationSpeed; save(); }
+  else if(e.key==='-'){ state.rotationSpeed=Math.max(0.0, state.rotationSpeed-0.004); speed.value=state.rotationSpeed; save(); }
+});
+
+boot();
+
+// Start with a welcoming quip (silent unless Voice toggled)
+setTimeout(()=>{ if(state.speak) quip(); }, 600);
+</script>
+</body>
+</html>
