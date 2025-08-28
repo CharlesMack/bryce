@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>P.O.P.S. — Bryce Pocket MP4 Layer Player</title>
+<meta name="description" content="Offline-first pocket MP4 player with overlays, clock, and Bryce personality HUD."/>
+<style>
+  :root{
+    /* Theme tokens */
+    --ink:#eaf2ff;           /* text */
+    --ink-dim:#b8c7e6;
+    --bg0:#0b0f16;           /* background */
+    --bg1:#101725;
+    --glass:rgba(255,255,255,.08);
+    --glass-2:rgba(255,255,255,.14);
+    --accent:#8e44ad;        /* purple */
+    --accent2:#3498db;       /* blue */
+    --good:#2ecc71;
+    --warn:#f39c12;
+    --bad:#e74c3c;
+    --radius:18px;
+    --shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  html,body{height:100%}
+  body{
+    margin:0; background: radial-gradient(1200px 700px at 70% 0%, #141e34, #0b0f16 60%);
+    color:var(--ink); font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+    overflow:hidden;
+  }
+  .wrap{position:relative; width:100%; height:100%; display:grid; grid-template-rows:auto 1fr auto; gap:10px; padding:12px}
+
+  /* Top Bar */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 14px; border-radius:var(--radius);
+    background:linear-gradient(180deg, var(--glass-2), var(--glass));
+    box-shadow:var(--shadow); backdrop-filter: blur(10px) saturate(120%);
+  }
+  .brand{display:flex; align-items:center; gap:10px; letter-spacing:.3px}
+  .logo{width:28px; height:28px; border-radius:50%; background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 0 12px rgba(77,162,255,.5)}
+  .title{font-weight:600}
+  .clock{font-variant-numeric:tabular-nums; opacity:.9}
+
+  /* Stage */
+  .stage{
+    position:relative; border-radius:var(--radius); overflow:hidden; background:var(--bg1); box-shadow:var(--shadow);
+    display:grid; grid-template-columns:1fr 280px; gap:0;
+  }
+  .stage.narrow{grid-template-columns:1fr}
+
+  .video-area{position:relative; background:#000}
+  video{width:100%; height:100%; object-fit:contain; background:#000}
+  .drop-hint{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none;
+    color:var(--ink-dim); font-weight:600; letter-spacing:.4px; text-shadow:0 1px 0 #0007}
+  .drop-hint.hidden{display:none}
+
+  /* Overlays */
+  .overlay{
+    position:absolute; left:12px; bottom:12px; right:12px; display:flex; align-items:end; justify-content:space-between; gap:10px;
+    pointer-events:none;
+  }
+  .chip{pointer-events:auto; user-select:none; padding:8px 10px; border-radius:12px; background:var(--glass); border:1px solid #ffffff1f; display:flex; align-items:center; gap:8px}
+  .chip .dot{width:8px; height:8px; border-radius:50%; background:var(--good); box-shadow:0 0 8px rgba(46, 204, 113, .6)}
+  .hud-right{display:flex; gap:8px}
+
+  /* Sidebar */
+  .sidebar{background:linear-gradient(180deg,var(--glass),transparent); border-left:1px solid #ffffff1a; padding:12px; display:flex; flex-direction:column; gap:10px}
+  .card{background:linear-gradient(180deg, #0d1422, #0c101a); border:1px solid #ffffff14; border-radius:14px; padding:12px}
+  .card h3{margin:.2rem 0 .6rem 0; font-size:13px; font-weight:700; letter-spacing:.3px; color:#cfe2ff}
+  .row{display:flex; align-items:center; gap:8px; margin:6px 0}
+  label{opacity:.9}
+  input[type="range"]{width:100%}
+  input[type="file"]{display:none}
+  .filelabel{display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:12px; background:linear-gradient(180deg, #121a2c, #0c121f); border:1px solid #ffffff1a; cursor:pointer}
+  .pill{padding:6px 10px; border-radius:999px; border:1px solid #ffffff1a; background:linear-gradient(180deg,#0f1726,#0c101a); display:inline-flex; gap:8px; align-items:center}
+  .seg{display:flex; gap:6px}
+  .seg button{flex:1; padding:8px 10px; border-radius:10px; border:1px solid #ffffff1a; background:#0d1422; color:var(--ink); cursor:pointer}
+  .seg button.active{background:linear-gradient(180deg,#15213a,#0d1422); outline:1px solid #4ca3ff55}
+  button.icon{display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; border-radius:10px; border:1px solid #ffffff1a; background:#0d1422; color:var(--ink); cursor:pointer}
+  .muted{opacity:.7}
+  .note-list{max-height:160px; overflow:auto; border-top:1px dashed #ffffff1a; margin-top:8px; padding-top:6px}
+  .note{font-size:12px; color:#dfecff; opacity:.9; padding:4px 6px; border-radius:6px; background:#111a2d; border:1px solid #ffffff10; margin:4px 0}
+
+  /* Bottom Controls */
+  .controls{
+    display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:var(--radius);
+    background:linear-gradient(180deg, var(--glass-2), var(--glass)); box-shadow:var(--shadow);
+  }
+  .controls .grow{flex:1}
+  .timeline{display:flex; gap:10px; align-items:center; flex:1}
+  .time{font-variant-numeric:tabular-nums; opacity:.9; width:90px; text-align:center}
+  .range{flex:1}
+  .kbd{padding:2px 6px; border-radius:6px; background:#0f1726; border:1px solid #ffffff22; font-size:12px; opacity:.9}
+
+  /* Responsive */
+  @media (max-width: 900px){
+    .stage{grid-template-columns:1fr}
+    .sidebar{display:none}
+  }
+</style>
+</head>
+<body>
+  <div class="wrap" id="app">
+    <div class="topbar">
+      <div class="brand"><div class="logo" aria-hidden="true"></div><div class="title">P.O.P.S. — <b>Bryce Pocket Player</b></div></div>
+      <div class="clock" id="clock">--:-- — --- --, ----</div>
+    </div>
+
+    <div class="stage" id="stage">
+      <!-- Video Area -->
+      <div class="video-area" id="videoArea" tabindex="0" aria-label="Video stage">
+        <video id="vid" preload="metadata" playsinline></video>
+        <div class="drop-hint" id="dropHint">Drop MP4/WebM here • or use <span class="kbd" style="margin:0 6px">O</span> to open</div>
+
+        <!-- Overlays -->
+        <div class="overlay">
+          <div class="chip" title="Bryce personality status"><span class="dot" id="statusDot"></span><span id="personaMsg">Hi Bryce — ready to roll.</span></div>
+          <div class="hud-right">
+            <div class="chip muted" title="Playback info"><span id="hudLabel">00:00 / 00:00</span></div>
+            <div class="chip" title="Layer filters"><span>Layer:</span>
+              <div class="seg" id="layerSeg">
+                <button data-layer="none" class="active" aria-pressed="true">None</button>
+                <button data-layer="cinema">Cinema</button>
+                <button data-layer="noir">Noir</button>
+                <button data-layer="pop">Pop</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="card">
+          <h3>Source</h3>
+          <label class="filelabel" for="file">➕ Load video file</label>
+          <input id="file" type="file" accept="video/mp4,video/webm,video/*" />
+          <div class="row"><span class="pill">
+            <span id="fileName">No file loaded</span>
+          </span></div>
+        </div>
+
+        <div class="card">
+          <h3>Audio</h3>
+          <div class="row"><label>Volume</label><input id="volume" type="range" min="0" max="1" step="0.01"></div>
+          <div class="row"><label>Playback Rate</label><input id="rate" type="range" min="0.25" max="2" step="0.05"></div>
+          <div class="seg" style="margin-top:6px">
+            <button id="muteBtn" class="icon">🔇 Mute</button>
+            <button id="duckBtn" class="icon">🦆 Auto‑duck (voice)</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Personality</h3>
+          <div class="row"><button id="speakBtn" class="icon">🗣️ Speak</button><span class="muted">Greeting / status</span></div>
+          <div class="row"><button id="coachBtn" class="icon">🎧 Coach Mode</button><span class="muted">Short prompts while you edit</span></div>
+          <div class="row"><small class="muted">Speech uses your device voice (no network).</small></div>
+        </div>
+
+        <div class="card">
+          <h3>Notes</h3>
+          <div class="row">
+            <button id="noteBtn" class="icon">📝 Add note @ time</button>
+          </div>
+          <div class="note-list" id="notes"></div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls" role="group" aria-label="Playback controls">
+      <button id="playBtn" class="icon">▶️ Play</button>
+      <button id="loopBtn" class="icon">🔁 Loop</button>
+      <button id="openBtn" class="icon">📂 Open</button>
+      <div class="timeline">
+        <span class="time" id="tCur">00:00</span>
+        <input class="range" id="seek" type="range" min="0" max="1000" step="1" value="0"/>
+        <span class="time" id="tEnd">00:00</span>
+      </div>
+      <div class="grow"></div>
+      <span class="muted">Keys: <span class="kbd">Space</span> play/pause • <span class="kbd">L</span> loop • <span class="kbd">M</span> mute • <span class="kbd">O</span> open</span>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const ns = 'pops_bryce.player.'; // localStorage namespace
+  const $ = sel => document.querySelector(sel);
+  const vid = $('#vid');
+  const playBtn = $('#playBtn');
+  const loopBtn = $('#loopBtn');
+  const openBtn = $('#openBtn');
+  const fileInput = $('#file');
+  const fileName = $('#fileName');
+  const seek = $('#seek');
+  const tCur = $('#tCur');
+  const tEnd = $('#tEnd');
+  const hudLabel = $('#hudLabel');
+  const dropHint = $('#dropHint');
+  const videoArea = $('#videoArea');
+  const personaMsg = $('#personaMsg');
+  const statusDot = $('#statusDot');
+  const volume = $('#volume');
+  const rate = $('#rate');
+  const muteBtn = $('#muteBtn');
+  const duckBtn = $('#duckBtn');
+  const speakBtn = $('#speakBtn');
+  const coachBtn = $('#coachBtn');
+  const clock = $('#clock');
+  const layerSeg = $('#layerSeg');
+  const noteBtn = $('#noteBtn');
+  const notes = $('#notes');
+
+  /* Utils */
+  const fmt = s=>{
+    if (!isFinite(s)) return '00:00';
+    const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), ss=Math.floor(s%60);
+    return h?`${h}:${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`;
+  };
+  const say = (text)=>{
+    personaMsg.textContent = text;
+    try{
+      if (!window.speechSynthesis) return;
+      const enabled = JSON.parse(localStorage.getItem(ns+'speak')||'false');
+      if(!enabled) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.0; u.pitch = 1.05; u.volume = 1.0;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    }catch(e){/* noop */}
+  };
+
+  /* Init settings */
+  const savedVol = parseFloat(localStorage.getItem(ns+'volume')||'0.8');
+  const savedRate = parseFloat(localStorage.getItem(ns+'rate')||'1');
+  const savedLoop = JSON.parse(localStorage.getItem(ns+'loop')||'false');
+  const savedLayer = localStorage.getItem(ns+'layer')||'none';
+  volume.value = savedVol; rate.value = savedRate; vid.volume = savedVol; vid.playbackRate = savedRate; vid.loop = savedLoop;
+  loopBtn.classList.toggle('active', savedLoop);
+  [...layerSeg.querySelectorAll('button')].forEach(b=>{
+    b.classList.toggle('active', b.dataset.layer===savedLayer);
+  });
+  applyLayer(savedLayer);
+
+  /* Clock */
+  function tickClock(){
+    const d = new Date();
+    const opts = {hour:'2-digit', minute:'2-digit'};
+    const t = d.toLocaleTimeString([], opts);
+    const dt = d.toLocaleDateString([], {weekday:'short', month:'short', day:'numeric', year:'numeric'});
+    clock.textContent = `${t} — ${dt}`;
+    requestAnimationFrame(()=>setTimeout(tickClock, 1000));
+  }
+  tickClock();
+
+  /* Media events */
+  vid.addEventListener('loadedmetadata', ()=>{
+    seek.max = Math.max(1, Math.floor(vid.duration*10));
+    tEnd.textContent = fmt(vid.duration);
+    hudLabel.textContent = `${fmt(vid.currentTime)} / ${fmt(vid.duration)}`;
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: fileName.textContent || 'Local Video', artist:'Bryce Pocket Player', album:'P.O.P.S.'
+      });
+    }
+  });
+  vid.addEventListener('timeupdate', ()=>{
+    seek.value = Math.floor(vid.currentTime*10);
+    tCur.textContent = fmt(vid.currentTime);
+    hudLabel.textContent = `${fmt(vid.currentTime)} / ${fmt(vid.duration)}`;
+  });
+  vid.addEventListener('play', ()=>{ playBtn.textContent = '⏸️ Pause'; statusDot.style.background = 'var(--good)';});
+  vid.addEventListener('pause', ()=>{ playBtn.textContent = '▶️ Play'; statusDot.style.background = 'var(--warn)';});
+  vid.addEventListener('ended', ()=>{ statusDot.style.background = 'var(--warn)'; say('Clip finished. Loop to repeat.'); });
+
+  /* Controls */
+  playBtn.onclick = ()=>{ vid.paused ? vid.play() : vid.pause(); };
+  loopBtn.onclick = ()=>{ vid.loop = !vid.loop; localStorage.setItem(ns+'loop', JSON.stringify(vid.loop)); loopBtn.classList.toggle('active', vid.loop); say(vid.loop? 'Loop is on.' : 'Loop is off.'); };
+  openBtn.onclick = ()=> fileInput.click();
+  volume.oninput = ()=>{ vid.volume = parseFloat(volume.value); localStorage.setItem(ns+'volume', vid.volume); };
+  rate.oninput = ()=>{ vid.playbackRate = parseFloat(rate.value); localStorage.setItem(ns+'rate', vid.playbackRate); };
+  muteBtn.onclick = ()=>{ vid.muted = !vid.muted; muteBtn.textContent = vid.muted? '🔈 Unmute':'🔇 Mute'; };
+  duckBtn.onclick = ()=>{
+    const on = duckBtn.classList.toggle('active');
+    duckBtn.textContent = on? '🦆 Ducking ON' : '🦆 Auto‑duck (voice)';
+    say(on? 'Auto duck enabled.' : 'Auto duck disabled.');
+  };
+
+  seek.oninput = ()=>{
+    const t = parseInt(seek.value,10)/10; vid.currentTime = Math.min(Math.max(t,0), vid.duration||0);
+  };
+
+  /* File loading */
+  fileInput.onchange = ()=>{
+    const f = fileInput.files?.[0];
+    if(!f) return;
+    loadFile(f);
+  };
+  function loadFile(f){
+    const url = URL.createObjectURL(f);
+    fileName.textContent = f.name;
+    vid.src = url; vid.play().catch(()=>{/* allow manual play */});
+    dropHint.classList.add('hidden');
+    say(randomGreeting());
+  }
+
+  /* Drag & drop */
+  ['dragenter','dragover'].forEach(ev=> videoArea.addEventListener(ev, e=>{e.preventDefault(); dropHint.classList.remove('hidden');}));
+  ;['dragleave','drop'].forEach(ev=> videoArea.addEventListener(ev, e=>{e.preventDefault(); if(ev==='drop'){const f=e.dataTransfer.files?.[0]; if(f) loadFile(f);} dropHint.classList.add('hidden');}));
+
+  /* Keyboard */
+  window.addEventListener('keydown', (e)=>{
+    if(e.target && ['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
+    if(e.code==='Space'){ e.preventDefault(); playBtn.click(); }
+    if(e.key==='l' || e.key==='L'){ loopBtn.click(); }
+    if(e.key==='m' || e.key==='M'){ muteBtn.click(); }
+    if(e.key==='o' || e.key==='O'){ openBtn.click(); }
+    if(e.key==='ArrowLeft'){ vid.currentTime = Math.max(0, vid.currentTime - 5); }
+    if(e.key==='ArrowRight'){ vid.currentTime = Math.min(vid.duration||0, vid.currentTime + 5); }
+  });
+
+  /* Personality */
+  speakBtn.onclick = ()=>{
+    const flag = JSON.parse(localStorage.getItem(ns+'speak')||'false');
+    const next = !flag; localStorage.setItem(ns+'speak', JSON.stringify(next));
+    speakBtn.textContent = next? '🔇 Silence' : '🗣️ Speak';
+    say(next? 'Voice enabled. Hello Bryce.' : 'Voice disabled.');
+  };
+  coachBtn.onclick = ()=>{
+    const on = coachBtn.classList.toggle('active');
+    coachBtn.textContent = on? '🎧 Coach ON':'🎧 Coach Mode';
+    if(on) say('Coach mode engaged. Minimal nudges only.'); else say('Coach mode off.');
+  };
+
+  function randomGreeting(){
+    const lines = [
+      'Loaded. Lights up, Bryce.',
+      'Ready when you are — take one.',
+      'Playback armed. Head in the frame, heart in the edit.',
+      'Need me to loop that? I can do this all day.'
+    ];
+    return lines[Math.floor(Math.random()*lines.length)];
+  }
+
+  /* Auto‑ducking via Web Speech callbacks */
+  const synth = window.speechSynthesis;
+  if (synth){
+    const orig = {vol: vid.volume};
+    const hook = ()=>{
+      if (!duckBtn.classList.contains('active')) return;
+      try{
+        const speaking = synth.speaking || synth.pending;
+        if (speaking){ orig.vol = vid.volume; vid.volume = Math.max(0, orig.vol*0.25); }
+        else { vid.volume = parseFloat(localStorage.getItem(ns+'volume')||orig.vol); }
+      }catch(e){}
+      requestAnimationFrame(hook);
+    };
+    hook();
+  }
+
+  /* Layers (CSS Filters) */
+  function applyLayer(mode){
+    let f = 'none';
+    if(mode==='cinema') f = 'contrast(1.08) saturate(1.08) brightness(1.02) hue-rotate(8deg)';
+    if(mode==='noir') f = 'grayscale(1) contrast(1.2) brightness(.95)';
+    if(mode==='pop') f = 'saturate(1.3) contrast(1.1)';
+    vid.style.filter = f; localStorage.setItem(ns+'layer', mode);
+  }
+  layerSeg.addEventListener('click', (e)=>{
+    const b = e.target.closest('button'); if(!b) return;
+    [...layerSeg.querySelectorAll('button')].forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); applyLayer(b.dataset.layer);
+  });
+
+  /* Notes at time */
+  const state = { notes: JSON.parse(localStorage.getItem(ns+'notes')||'[]') };
+  function renderNotes(){
+    notes.innerHTML = state.notes.map(n=> `<div class="note">${fmt(n.t)} — ${n.text}</div>`).join('');
+  }
+  renderNotes();
+  noteBtn.onclick = ()=>{
+    const text = prompt('Short note to drop at this time?');
+    if(!text) return; state.notes.push({t: vid.currentTime||0, text});
+    localStorage.setItem(ns+'notes', JSON.stringify(state.notes)); renderNotes();
+  };
+
+  /* First‑run hint */
+  personaMsg.textContent = 'Hi Bryce — drop a video here or press O to open a file.';
+})();
+</script>
+</body>
+</html>
