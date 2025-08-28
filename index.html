@@ -1,0 +1,1214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Bryce Holograms — P.O.P.S. Panel (Multi-Deck)</title>
+<meta name="description" content="Offline-first hologram panel with multi-deck CSS 3D cubes, scanlines, glow, HUD, voice auto-duck, browser panel, and state persistence (pops_bryce.*)." />
+<style>
+  :root {
+    --ink: #e7ebff; --muted: #a7b0d6; --accent: #6cf5ff; --accent2: #c28bff; --bg: #0a0b12;
+    --panel: #0f1220; --edge: #1a2140; --good: #6cff9a; --warn: #ffd36c; --danger: #ff6c9a;
+    --scanline: rgba(255,255,255,0.06);
+    --holo-size: 260px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: radial-gradient(1200px 600px at 60% -20%, #1c2344 0%, #0a0b12 60%);
+    color: var(--ink); font: 14px/1.45 system-ui, Segoe UI, Inter, Roboto, sans-serif;
+  }
+  .panel {
+    position: relative; max-width: 960px; margin: 24px auto; border: 1px solid var(--edge);
+    border-radius: 16px; background: linear-gradient(180deg, rgba(18,22,42,.75), rgba(12,14,26,.85));
+    box-shadow: 0 20px 80px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.05); overflow: clip;
+  }
+  .hud {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px;
+    padding: 10px 12px; border-bottom: 1px solid var(--edge); background: rgba(10,12,24,.5);
+    backdrop-filter: blur(6px);
+  }
+  .hud .title { font-weight: 600; letter-spacing: .3px; }
+  .hud .clock { justify-self: center; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .hud .chip {
+    justify-self: end; padding: 6px 10px; border: 1px solid #274; border-radius: 999px;
+    background: linear-gradient(180deg, rgba(20,40,34,.6), rgba(14,22,20,.6)); color: var(--good); font-size: 12px;
+  }
+  .stage-wrap {
+    position: relative; aspect-ratio: 16/9; background: radial-gradient(60% 100% at 50% 120%, rgba(108,245,255,.15), transparent 60%),
+               radial-gradient(60% 100% at 50% 120%, rgba(194,139,255,.12), transparent 70%), #0b0e18;
+  }
+  .stage { position: absolute; inset: 0; display: grid; place-items: center; perspective: 900px; transition: perspective 0.3s ease; }
+  .stage.overview { display: flex; flex-direction: row; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; align-items: center; perspective: 2400px; scroll-snap-type: x proximity; }
+  .stage.overview .holo { scroll-snap-align: center; margin: 0 12px; cursor: pointer; transition: transform 0.3s ease; }
+  .stage.overview .holo:hover { transform: scale(1.1); }
+  .stage.overview .beam, .stage.overview .projector { display: none; }
+  .beam {
+    position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); width: 52%; height: 30%; pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(108,245,255,.35), rgba(108,245,255,0) 60%),
+               radial-gradient(ellipse at center, rgba(194,139,255,.25), rgba(194,139,255,0) 70%); filter: blur(8px) saturate(120%);
+  }
+  .projector {
+    position: absolute; left: 50%; bottom: 2%; transform: translateX(-50%); width: 320px; max-width: 56%; height: 42px;
+    border: 1px solid var(--edge); border-radius: 14px; background: linear-gradient(180deg, #0e1222, #0a0c18);
+    box-shadow: 0 10px 30px rgba(0,0,0,.5), 0 0 24px rgba(108,245,255,.12), 0 0 36px rgba(194,139,255,.10) inset;
+  }
+  .projector::after { content: ""; position: absolute; inset: 4px; border-radius: 12px; border: 1px dashed rgba(108,245,255,.25); }
+  .scanlines {
+    position: absolute; inset: 0; pointer-events: none; opacity: .55; mix-blend-mode: screen;
+    background-image: repeating-linear-gradient(to bottom, transparent 0 2px, var(--scanline) 2px 3px);
+  }
+  .scanlines.off { display: none; }
+  .holo {
+    position: relative; width: var(--holo-size); height: var(--holo-size); transform-style: preserve-3d;
+    filter: drop-shadow(0 0 16px rgba(108,245,255,.35)) drop-shadow(0 0 28px rgba(194,139,255,.25));
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .stage.overview .holo { --holo-size: var(--overview-size, 160px); }
+  .holo.glow { filter: drop-shadow(0 0 24px rgba(108,245,255,.6)) drop-shadow(0 0 42px rgba(194,139,255,.45)); }
+  .holo.glow.active { animation: glowPulse 1.5s ease-in-out infinite; }
+  .holo.focused {
+    transform: scale(1.1); filter: drop-shadow(0 0 32px rgba(108,245,255,.8)) drop-shadow(0 0 48px rgba(194,139,255,.6));
+  }
+  .holo.playing { animation: pulse 2s ease-in-out infinite; }
+  .holo .face {
+    position: absolute; inset: 0; background: linear-gradient(180deg, rgba(108,245,255,.25), rgba(194,139,255,.08));
+    border: 1px solid rgba(108,245,255,.55); box-shadow: inset 0 0 28px rgba(194,139,255,.25);
+    backdrop-filter: blur(1.5px) saturate(120%); display: grid; place-items: center; overflow: hidden;
+  }
+  .holo .f1 { transform: translateZ(calc(var(--holo-size) / 2)); }
+  .holo .f2 { transform: rotateY(90deg) translateZ(calc(var(--holo-size) / 2)); }
+  .holo .f3 { transform: rotateY(180deg) translateZ(calc(var(--holo-size) / 2)); }
+  .holo .f4 { transform: rotateY(-90deg) translateZ(calc(var(--holo-size) / 2)); }
+  .holo .f5 { transform: rotateX(90deg) translateZ(calc(var(--holo-size) / 2)); }
+  .holo .f6 { transform: rotateX(-90deg) translateZ(calc(var(--holo-size) / 2)); }
+  .media { width: 100%; height: 100%; object-fit: cover; display: block; transform: translateZ(1px); z-index: 20; }
+  .media.canvas { image-rendering: auto; }
+  .media.iframe { border: none; }
+  .audio-wrapper {
+    width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center;
+    background: linear-gradient(135deg, rgba(108,245,255,.1), rgba(194,139,255,.08));
+  }
+  .audio-controls {
+    position: absolute; bottom: 8px; left: 8px; right: 8px; z-index: 30;
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    background: rgba(10,12,24,.85); border: 1px solid rgba(108,245,255,.25);
+    border-radius: 8px; backdrop-filter: blur(8px);
+  }
+  .audio-controls button {
+    appearance: none; background: none; border: none; color: var(--ink);
+    padding: 4px; border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+  .audio-controls button:hover { background: rgba(108,245,255,.2); }
+  .volume-slider {
+    flex: 1; height: 4px; background: rgba(255,255,255,.2); border-radius: 2px; overflow: hidden;
+    position: relative; cursor: pointer;
+  }
+  .volume-slider::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    width: var(--volume, 50%); transition: width 0.1s ease;
+  }
+  .label {
+    position: absolute; bottom: 6px; left: 8px; padding: 2px 6px; border-radius: 6px; font-size: 11px;
+    background: rgba(8,10,20,.65); border: 1px solid rgba(108,245,255,.35); color: var(--ink);
+  }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 10px; padding: 12px; border-top: 1px solid var(--edge);
+    background: linear-gradient(180deg, rgba(11,14,24,.6), rgba(9,10,16,.8));
+  }
+  .controls .group { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 12px; background: #0e1222; }
+  label { color: var(--muted); font-size: 12px; }
+  input[type="range"] { width: 160px; }
+  button, .toggle {
+    appearance: none; border: 1px solid var(--edge); background: linear-gradient(180deg, #142036, #0e1222);
+    color: var(--ink); padding: 8px 10px; border-radius: 10px; cursor: pointer; transition: all 0.2s ease;
+  }
+  button:hover, .toggle:hover {
+    background: linear-gradient(180deg, #1a2444, #121528);
+    border-color: rgba(108,245,255,.4);
+  }
+  .toggle.active, button.primary { 
+    border-color: rgba(108,245,255,.6); 
+    box-shadow: 0 0 0 1px rgba(108,245,255,.2) inset, 0 0 20px rgba(108,245,255,.15); 
+  }
+  button.danger {
+    border-color: rgba(255,108,154,.6);
+    background: linear-gradient(180deg, #3a1822, #2a1018);
+    color: var(--danger);
+  }
+  button.danger:hover {
+    background: linear-gradient(180deg, #4a1e2a, #321420);
+    box-shadow: 0 0 0 1px rgba(255,108,154,.2) inset, 0 0 20px rgba(255,108,154,.15);
+  }
+  select { background: #0e1222; color: var(--ink); border: 1px solid var(--edge); border-radius: 10px; padding: 6px 8px; }
+  .kbd { padding: 2px 6px; border: 1px solid var(--edge); border-radius: 6px; background: #0b0e18; font-size: 11px; color: var(--muted); }
+  .hint { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .browser-overlay {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 30;
+    max-width: 600px; width: 90%; padding: 12px; border-radius: 12px; background: rgba(10,12,24,.75);
+    backdrop-filter: blur(10px); border: 1px solid rgba(108,245,255,.35);
+  }
+  .browser-overlay input {
+    width: 100%; padding: 8px; border: 1px solid var(--edge); border-radius: 8px; background: #0b0e18; color: var(--ink);
+  }
+  .drop {
+    position: absolute; inset: 0; display: none; place-items: center; background: rgba(10,12,24,.75);
+    border: 2px dashed rgba(108,245,255,.35); color: var(--ink); font-size: 18px; z-index: 5;
+  }
+  .drop.show { display: grid; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; clip: rect(0 0 0 0); overflow: hidden; }
+  .deck-nav { display: flex; gap: 8px; padding: 8px; justify-content: flex-start; overflow-x: auto; }
+  .deck-nav button { padding: 6px 12px; font-size: 12px; flex-shrink: 0; }
+  .deck-nav button.active { background: linear-gradient(180deg, #1a2444, #121528); border-color: var(--accent); }
+  .holo.hidden { display: none; }
+  .holo.transition { transition: opacity 0.3s ease, transform 0.3s ease; }
+  @keyframes pulse { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+  @keyframes glowPulse { 0%, 100% { filter: drop-shadow(0 0 16px rgba(108,245,255,.35)) drop-shadow(0 0 28px rgba(194,139,255,.25)); }
+                         50% { filter: drop-shadow(0 0 24px rgba(108,245,255,.6)) drop-shadow(0 0 42px rgba(194,139,255,.45)); } }
+  @media (max-width: 640px) {
+      :root { --holo-size: 180px; }
+      .controls { flex-direction: column; }
+      .controls .group { flex-wrap: wrap; }
+      .deck-nav { flex-wrap: nowrap; }
+  }
+</style>
+</head>
+<body>
+  <main class="panel" aria-label="Bryce Holograms panel">
+    <header class="hud">
+      <div class="title">Bryce Holograms <span style="color:var(--muted)">• P.O.P.S. Grandson</span></div>
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="chip" id="chip">personality: <strong>guide</strong></div>
+    </header>
+    <nav class="deck-nav" id="deck-nav">
+      <button class="deck-btn active" data-deck="0">Deck 1</button>
+      <button class="deck-btn" data-deck="1">Deck 2</button>
+      <button class="deck-btn" data-deck="2">Deck 3</button>
+      <button id="add-deck" class="primary">+ Deck</button>
+    </nav>
+    <section class="stage-wrap">
+      <div class="stage" aria-live="polite">
+        <div id="scanlines" class="scanlines"></div>
+        <div id="cube-0" class="holo glow" aria-label="Holographic cube 1" tabindex="0">
+          <div class="face f1"></div>
+          <div class="face f2"></div>
+          <div class="face f3"></div>
+          <div class="face f4"></div>
+          <div class="face f5"></div>
+          <div class="face f6"></div>
+        </div>
+        <div id="cube-1" class="holo glow hidden" aria-label="Holographic cube 2" tabindex="0">
+          <div class="face f1"></div>
+          <div class="face f2"></div>
+          <div class="face f3"></div>
+          <div class="face f4"></div>
+          <div class="face f5"></div>
+          <div class="face f6"></div>
+        </div>
+        <div id="cube-2" class="holo glow hidden" aria-label="Holographic cube 3" tabindex="0">
+          <div class="face f1"></div>
+          <div class="face f2"></div>
+          <div class="face f3"></div>
+          <div class="face f4"></div>
+          <div class="face f5"></div>
+          <div class="face f6"></div>
+        </div>
+        <div class="beam"></div>
+        <div class="projector" aria-hidden="true"></div>
+        <div class="drop" id="drop">Drop files or enter URL</div>
+        <div class="browser-overlay" id="browser-overlay" hidden role="dialog" aria-label="Browser URL input">
+          <input type="text" id="url-input" placeholder="Enter URL or search query" aria-label="URL or search query" />
+          <div class="group" style="margin-top: 8px; justify-content: flex-end">
+            <button id="goBtn" class="primary">Go</button>
+            <button id="cancelBrowserBtn">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    <section class="controls" aria-label="Controls">
+      <div class="group">
+        <button id="btnPlay" class="toggle active" aria-pressed="true">Rotate <span class="kbd">Space</span></button>
+        <label for="speed">Speed</label>
+        <input id="speed" type="range" min="0" max="0.06" step="0.001" value="0.015" aria-label="Rotation speed" />
+        <span class="hint">± <span class="kbd">+</span>/<span class="kbd">-</span></span>
+      </div>
+      <div class="group">
+        <input id="picker" type="file" accept="image/*,video/*,audio/*,text/plain,application/pdf" class="sr-only" multiple aria-label="Upload media file" />
+        <button id="btnAdd" class="primary">+ Add Media</button>
+        <button id="btnBrowser" class="primary">+ Browser</button>
+        <button id="btnOpenBrowser">Open Browser</button>
+        <button id="btnClearMedia" class="danger">Clear</button>
+        <button id="btnPlayMedia">Play</button>
+        <button id="btnPauseMedia">Pause</button>
+        <button id="btnUnmute">Unmute</button>
+      </div>
+      <div class="group">
+        <button id="btnGlow" class="toggle active">Glow <span class="kbd">G</span></button>
+        <button id="btnScan" class="toggle active">Scanlines <span class="kbd">S</span></button>
+        <label for="layer">Layer</label>
+        <select id="layer" aria-label="Visual filter">
+          <option value="none">None</option>
+          <option value="cinema">Cinema</option>
+          <option value="noir">Noir</option>
+          <option value="pop">Pop</option>
+        </select>
+      </div>
+      <div class="group">
+        <button id="btnSpeak" class="toggle">Voice</button>
+        <button id="btnQuip">Say hi</button>
+        <button id="btnHum" class="toggle">Projector hum</button>
+      </div>
+      <div class="group">
+        <button id="btnOverview" class="toggle">Overview</button>
+        <button id="btnFocus" class="toggle">Focus</button>
+        <button id="btnFull">Full Screen</button>
+        <button id="btnReset">Reset</button>
+      </div>
+      <div class="hint">Drag: rotate with mouse • Wheel: zoom • Arrows: rotate • O: overview</div>
+    </section>
+  </main>
+
+<script>
+const NS = 'pops_bryce.holograms';
+const state = {
+  activeDeck: 0,
+  overview: false,
+  decks: [
+    { rotationSpeed: 0.015, rotating: true, glow: true, media: { kind: 'none', url: '', element: null }, zoom: 1, rx: -18, ry: 24, focused: false, volume: 0.7 },
+    { rotationSpeed: 0.015, rotating: true, glow: true, media: { kind: 'none', url: '', element: null }, zoom: 1, rx: -18, ry: 24, focused: false, volume: 0.7 },
+    { rotationSpeed: 0.015, rotating: true, glow: true, media: { kind: 'none', url: '', element: null }, zoom: 1, rx: -18, ry: 24, focused: false, volume: 0.7 }
+  ],
+  scanlines: true,
+  layer: 'none',
+  speak: false,
+  hum: false,
+  personality: 'guide',
+  fullscreen: false
+};
+
+function save() {
+  localStorage.setItem(NS, JSON.stringify({
+    activeDeck: state.activeDeck,
+    overview: state.overview,
+    decks: state.decks.map(deck => ({
+      rotationSpeed: deck.rotationSpeed,
+      rotating: deck.rotating,
+      glow: deck.glow,
+      media: { kind: deck.media.kind, url: deck.media.url },
+      zoom: deck.zoom,
+      rx: deck.rx,
+      ry: deck.ry,
+      focused: deck.focused,
+      volume: deck.volume
+    })),
+    scanlines: state.scanlines,
+    layer: state.layer,
+    speak: state.speak,
+    hum: state.hum,
+    personality: state.personality,
+    fullscreen: state.fullscreen
+  }));
+}
+
+function load() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NS));
+    if (saved) {
+      state.activeDeck = saved.activeDeck || 0;
+      state.overview = saved.overview ?? false;
+      state.scanlines = saved.scanlines ?? true;
+      state.layer = saved.layer || 'none';
+      state.speak = saved.speak || false;
+      state.hum = saved.hum || false;
+      state.personality = saved.personality || 'guide';
+      state.fullscreen = saved.fullscreen || false;
+      if (saved.decks) {
+        state.decks = saved.decks.map((savedDeck, i) => ({
+          rotationSpeed: savedDeck.rotationSpeed ?? 0.015,
+          rotating: savedDeck.rotating ?? true,
+          glow: savedDeck.glow ?? true,
+          media: savedDeck.media ?? { kind: 'none', url: '', element: null },
+          zoom: savedDeck.zoom ?? 1,
+          rx: savedDeck.rx ?? -18,
+          ry: savedDeck.ry ?? 24,
+          focused: savedDeck.focused ?? false,
+          volume: savedDeck.volume ?? 0.7
+        }));
+        state.decks.forEach((deck, i) => {
+          if (deck.media && deck.media.kind !== 'none') {
+            loadMedia(deck.media, i);
+          }
+        });
+      }
+    }
+  } catch (e) {
+    showToast('Failed to load state');
+  }
+}
+load();
+
+const cubes = [document.getElementById('cube-0'), document.getElementById('cube-1'), document.getElementById('cube-2')];
+const scan = document.getElementById('scanlines');
+const clockEl = document.getElementById('clock');
+const chip = document.getElementById('chip');
+const drop = document.getElementById('drop');
+const browserOverlay = document.getElementById('browser-overlay');
+const urlInput = document.getElementById('url-input');
+const goBtn = document.getElementById('goBtn');
+const cancelBrowserBtn = document.getElementById('cancelBrowserBtn');
+const btnPlay = document.getElementById('btnPlay');
+const speed = document.getElementById('speed');
+const btnAdd = document.getElementById('btnAdd');
+const picker = document.getElementById('picker');
+const btnBrowser = document.getElementById('btnBrowser');
+const btnOpenBrowser = document.getElementById('btnOpenBrowser');
+const btnPlayMedia = document.getElementById('btnPlayMedia');
+const btnPauseMedia = document.getElementById('btnPauseMedia');
+const btnUnmute = document.getElementById('btnUnmute');
+const btnGlow = document.getElementById('btnGlow');
+const btnScan = document.getElementById('btnScan');
+const layerSel = document.getElementById('layer');
+const btnSpeak = document.getElementById('btnSpeak');
+const btnQuip = document.getElementById('btnQuip');
+const btnHum = document.getElementById('btnHum');
+const btnOverview = document.getElementById('btnOverview');
+const btnFocus = document.getElementById('btnFocus');
+const btnFull = document.getElementById('btnFull');
+const btnReset = document.getElementById('btnReset');
+const btnClearMedia = document.getElementById('btnClearMedia');
+const deckNav = document.getElementById('deck-nav');
+const addDeckBtn = document.getElementById('add-deck');
+const stage = document.querySelector('.stage');
+
+function showToast(message, bgClass = 'bg-red-600') {
+  const toast = document.createElement('div');
+  toast.textContent = message;
+  toast.className = `fixed top-4 right-4 p-2 text-white rounded ${bgClass}`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+function tickClock() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  clockEl.textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+setInterval(tickClock, 1000); tickClock();
+
+function updateChip() {
+  chip.innerHTML = `personality: <strong>${state.personality}</strong>`;
+}
+updateChip();
+
+function applyLayer() {
+  const wrap = document.querySelector('.stage-wrap');
+  wrap.style.filter = 'none';
+  switch (state.layer) {
+    case 'cinema': wrap.style.filter = 'contrast(1.08) saturate(1.1) brightness(1.02)'; break;
+    case 'noir': wrap.style.filter = 'grayscale(1) contrast(1.2) brightness(1.05)'; break;
+    case 'pop': wrap.style.filter = 'saturate(1.35) contrast(1.05)'; break;
+  }
+}
+
+let raf; let last = performance.now();
+function loop(t) {
+  raf = requestAnimationFrame(loop);
+  const dt = (t - last) / 1000; last = t;
+  state.decks.forEach((deck, i) => {
+    if (deck.rotating && !deck.focused && !state.fullscreen && !state.overview) {
+      deck.ry += deck.rotationSpeed * 360 * dt;
+    }
+    if (state.overview) {
+      cubes[i].style.transform = `rotateX(${deck.rx}deg) rotateY(${deck.ry}deg) scale(1)`;
+    } else {
+      cubes[i].style.transform = `translateZ(0px) rotateX(${deck.rx}deg) rotateY(${deck.ry}deg) scale(${deck.zoom})`;
+    }
+  });
+}
+
+function switchDeck(newDeckIndex) {
+  if (newDeckIndex < 0 || newDeckIndex >= state.decks.length) return;
+  if (!state.overview) {
+    cubes[state.activeDeck].classList.add('hidden', 'transition');
+    cubes[newDeckIndex].classList.remove('hidden');
+  }
+  state.activeDeck = newDeckIndex;
+  updateDeckUI();
+  updateMediaButtons();
+  if (state.overview) {
+    stage.scrollTo({
+      left: cubes[newDeckIndex].offsetLeft - stage.clientWidth / 2 + cubes[newDeckIndex].clientWidth / 2,
+      behavior: 'smooth'
+    });
+  }
+  save();
+  setTimeout(() => cubes[state.activeDeck].classList.remove('transition'), 300);
+}
+
+function updateDeckUI() {
+  deckNav.querySelectorAll('.deck-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.deck) === state.activeDeck);
+  });
+  const deck = state.decks[state.activeDeck];
+  speed.value = deck.rotationSpeed;
+  btnPlay.classList.toggle('active', deck.rotating);
+  btnPlay.setAttribute('aria-pressed', String(deck.rotating));
+  btnGlow.classList.toggle('active', deck.glow);
+  cubes[state.activeDeck].classList.toggle('glow', deck.glow);
+  btnFocus.classList.toggle('active', deck.focused);
+  cubes[state.activeDeck].classList.toggle('focused', deck.focused);
+}
+
+function addNewDeck() {
+  if (state.decks.length >= 50) {
+    showToast('Reached soft limit of 50 decks for performance');
+    return;
+  }
+  const newDeck = {
+    rotationSpeed: 0.015,
+    rotating: true,
+    glow: true,
+    media: { kind: 'none', url: '', element: null },
+    zoom: 1,
+    rx: -18,
+    ry: 24,
+    focused: false,
+    volume: 0.7
+  };
+  state.decks.push(newDeck);
+  const cube = document.createElement('div');
+  cube.id = `cube-${state.decks.length - 1}`;
+  cube.className = 'holo glow hidden';
+  cube.setAttribute('aria-label', `Holographic cube ${state.decks.length}`);
+  cube.tabIndex = 0;
+  for (let i = 1; i <= 6; i++) {
+    const face = document.createElement('div');
+    face.className = `face f${i}`;
+    cube.appendChild(face);
+  }
+  stage.insertBefore(cube, document.querySelector('.beam'));
+  cubes.push(cube);
+  const btn = document.createElement('button');
+  btn.className = 'deck-btn';
+  btn.dataset.deck = state.decks.length - 1;
+  btn.textContent = `Deck ${state.decks.length}`;
+  deckNav.insertBefore(btn, addDeckBtn);
+  setupCubeInteractions(cube, state.decks.length - 1);
+  switchDeck(state.decks.length - 1); // Fixed: Corrected from switchXB Deck
+}
+
+function playToggle(on) {
+  const deck = state.decks[state.activeDeck];
+  deck.rotating = (on !== undefined) ? on : !deck.rotating;
+  save();
+  btnPlay.classList.toggle('active', deck.rotating);
+  btnPlay.setAttribute('aria-pressed', String(deck.rotating));
+}
+
+function setupCubeInteractions(cube, deckIndex) {
+  let dragging = false, px = 0, py = 0, touchStartX, touchStartY, pinchStartDist;
+  cube.addEventListener('pointerdown', e => {
+    if (state.overview) return; // Disable dragging in overview mode
+    dragging = true;
+    px = e.clientX;
+    py = e.clientY;
+    cube.setPointerCapture(e.pointerId);
+  });
+  cube.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const deck = state.decks[deckIndex];
+    deck.ry += (e.clientX - px) * 0.25;
+    deck.rx -= (e.clientY - py) * 0.25;
+    px = e.clientX;
+    py = e.clientY;
+    save();
+  });
+  cube.addEventListener('pointerup', () => {
+    dragging = false;
+  });
+  cube.addEventListener('wheel', e => {
+    if (state.overview) return; // Disable zooming in overview mode
+    e.preventDefault();
+    const deck = state.decks[deckIndex];
+    deck.zoom = Math.min(1.8, Math.max(0.6, deck.zoom + (e.deltaY > 0 ? -0.06 : 0.06)));
+    save();
+  }, { passive: false });
+  cube.addEventListener('touchstart', e => {
+    if (state.overview) return; // Disable touch in overview mode
+    if (e.touches.length === 1) {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+      pinchStartDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+  });
+  cube.addEventListener('touchmove', e => {
+    if (state.overview) return; // Disable touch in overview mode
+    e.preventDefault();
+    const deck = state.decks[deckIndex];
+    if (e.touches.length === 1) {
+      const dx = e.touches[0].clientX - touchStartX;
+      const dy = e.touches[0].clientY - touchStartY;
+      deck.ry += dx * 0.25;
+      deck.rx -= dy * 0.25;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      save();
+    } else if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      deck.zoom = Math.min(1.8, Math.max(0.6, deck.zoom + (dist - pinchStartDist) * 0.005));
+      pinchStartDist = dist;
+      save();
+    }
+  }, { passive: false });
+  cube.addEventListener('keydown', e => {
+    if (state.overview) return; // Disable keyboard rotation in overview mode
+    const deck = state.decks[deckIndex];
+    if (e.key === 'ArrowLeft') deck.ry -= 5;
+    if (e.key === 'ArrowRight') deck.ry += 5;
+    if (e.key === 'ArrowUp') deck.rx -= 5;
+    if (e.key === 'ArrowDown') deck.rx += 5;
+    save();
+  });
+}
+
+function createAudioControls(audioElement, deckIndex) {
+  const controls = document.createElement('div');
+  controls.className = 'audio-controls';
+  controls.setAttribute('role', 'region');
+  controls.setAttribute('aria-label', 'Audio controls');
+  
+  const playBtn = document.createElement('button');
+  playBtn.textContent = '▶';
+  playBtn.setAttribute('aria-label', audioElement.paused ? 'Play audio' : 'Pause audio');
+  playBtn.onclick = () => {
+    if (audioElement.paused) {
+      audioElement.play().catch(() => showToast('Failed to play audio'));
+      playBtn.textContent = '⏸';
+      playBtn.setAttribute('aria-label', 'Pause audio');
+      cubes[deckIndex].classList.add('playing');
+    } else {
+      audioElement.pause();
+      playBtn.textContent = '▶';
+      playBtn.setAttribute('aria-label', 'Play audio');
+      cubes[deckIndex].classList.remove('playing');
+    }
+  };
+  
+  const volumeSlider = document.createElement('div');
+  volumeSlider.className = 'volume-slider';
+  volumeSlider.setAttribute('role', 'slider');
+  volumeSlider.setAttribute('aria-valuemin', '0');
+  volumeSlider.setAttribute('aria-valuemax', '1');
+  volumeSlider.setAttribute('aria-valuenow', state.decks[deckIndex].volume);
+  volumeSlider.style.setProperty('--volume', `${state.decks[deckIndex].volume * 100}%`);
+  volumeSlider.onclick = (e) => {
+    const rect = volumeSlider.getBoundingClientRect();
+    const percent = (e.clientX - rect.left) / rect.width;
+    state.decks[deckIndex].volume = Math.max(0, Math.min(1, percent));
+    audioElement.volume = state.decks[deckIndex].volume;
+    volumeSlider.style.setProperty('--volume', `${state.decks[deckIndex].volume * 100}%`);
+    volumeSlider.setAttribute('aria-valuenow', state.decks[deckIndex].volume);
+    save();
+  };
+  
+  const muteBtn = document.createElement('button');
+  muteBtn.textContent = audioElement.muted ? '🔇' : '🔊';
+  muteBtn.setAttribute('aria-label', audioElement.muted ? 'Unmute audio' : 'Mute audio');
+  muteBtn.onclick = () => {
+    audioElement.muted = !audioElement.muted;
+    muteBtn.textContent = audioElement.muted ? '🔇' : '🔊';
+    muteBtn.setAttribute('aria-label', audioElement.muted ? 'Unmute audio' : 'Mute audio');
+  };
+  
+  controls.appendChild(playBtn);
+  controls.appendChild(volumeSlider);
+  controls.appendChild(muteBtn);
+  
+  audioElement.addEventListener('play', () => {
+    playBtn.textContent = '⏸';
+    playBtn.setAttribute('aria-label', 'Pause audio');
+    cubes[deckIndex].classList.add('playing');
+  });
+  audioElement.addEventListener('pause', () => {
+    playBtn.textContent = '▶';
+    playBtn.setAttribute('aria-label', 'Play audio');
+    cubes[deckIndex].classList.remove('playing');
+  });
+  audioElement.addEventListener('ended', () => {
+    playBtn.textContent = '▶';
+    playBtn.setAttribute('aria-label', 'Play audio');
+    cubes[deckIndex].classList.remove('playing');
+  });
+  
+  return controls;
+}
+
+function loadMedia({ kind, url }, deckIndex = state.activeDeck) {
+  try {
+    stopAllMedia(deckIndex);
+    const front = cubes[deckIndex].querySelector('.f1');
+    front.innerHTML = '';
+    let element = null;
+    if (kind === 'image') {
+      const img = new Image();
+      img.className = 'media';
+      img.src = url;
+      img.onload = () => {
+        if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+      };
+      img.onerror = () => showToast('Failed to load image');
+      front.appendChild(img);
+      element = img;
+    } else if (kind === 'video') {
+      const vid = document.createElement('video');
+      Object.assign(vid, { 
+        className: 'media', src: url, loop: true, playsInline: true, controls: true, muted: false, volume: state.decks[deckIndex].volume
+      });
+      vid.onerror = () => showToast('Failed to load video');
+      front.appendChild(vid);
+      element = vid;
+      cubes[deckIndex].classList.add('active');
+      vid.addEventListener('pause', () => cubes[deckIndex].classList.remove('active'));
+      vid.addEventListener('play', () => cubes[deckIndex].classList.add('active'));
+    } else if (kind === 'audio') {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'audio-wrapper';
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 256;
+      canvas.className = 'media canvas';
+      wrapper.appendChild(canvas);
+      const audio = document.createElement('audio');
+      Object.assign(audio, { src: url, loop: true, preload: 'metadata', volume: state.decks[deckIndex].volume, crossOrigin: 'anonymous' });
+      audio.onerror = () => showToast('Failed to load audio');
+      const controls = createAudioControls(audio, deckIndex);
+      wrapper.appendChild(controls);
+      front.appendChild(wrapper);
+      setupAudioVisualization(audio, canvas);
+      element = audio;
+      cubes[deckIndex].classList.add('active');
+      audio.addEventListener('pause', () => cubes[deckIndex].classList.remove('active'));
+      audio.addEventListener('play', () => cubes[deckIndex].classList.add('active'));
+    } else if (kind === 'text') {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      canvas.className = 'media canvas';
+      front.appendChild(canvas);
+      fetch(url).then(res => res.text()).then(txt => renderTextToCanvas(canvas, txt)).catch(() => showToast('Failed to load text'));
+      element = canvas;
+    } else if (kind === 'pdf') {
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.textContent = 'Open PDF';
+      a.className = 'label';
+      front.appendChild(a);
+    } else if (kind === 'browser') {
+      const iframe = document.createElement('iframe');
+      iframe.className = 'media iframe';
+      iframe.src = url;
+      iframe.style.transform = 'translateZ(1px)';
+      iframe.style.zIndex = '20';
+      let loaded = false;
+      setTimeout(() => { if (!loaded) { showToast('Failed to load browser content'); clearMedia(); } }, 10000);
+      iframe.onload = () => loaded = true;
+      iframe.onerror = () => {
+        showToast('Failed to load browser content');
+        window.open(url, '_blank');
+        clearMedia();
+      };
+      front.appendChild(iframe);
+      element = iframe;
+    }
+    const lab = document.createElement('div');
+    lab.className = 'label';
+    lab.textContent = kind === 'browser' ? 'Browser' : kind.charAt(0).toUpperCase() + kind.slice(1);
+    front.appendChild(lab);
+    state.decks[deckIndex].media = { kind, url, element };
+    updateMediaButtons();
+    save();
+  } catch (e) {
+    showToast('Failed to load media');
+    clearMedia();
+  }
+}
+
+function clearMedia(deckIndex = state.activeDeck) {
+  stopAllMedia(deckIndex);
+  const front = cubes[deckIndex].querySelector('.f1');
+  front.innerHTML = '';
+  cubes[deckIndex].classList.remove('playing', 'active');
+  state.decks[deckIndex].media = { kind: 'none', url: '', element: null };
+  save();
+  updateMediaButtons();
+}
+
+function stopAllMedia(deckIndex = state.activeDeck) {
+  cubes[deckIndex].querySelectorAll('audio, video').forEach(media => {
+    if (!media.paused) media.pause();
+    media.currentTime = 0;
+  });
+  cubes[deckIndex].classList.remove('playing', 'active');
+}
+
+function renderTextToCanvas(cv, txt) {
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#0c0f1c';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = '#e7ebff';
+  ctx.font = '18px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+  const pad = 16, maxW = cv.width - 2 * pad, lineH = 22;
+  const words = txt.split(/\s+/);
+  let x = pad, y = pad + 20, line = '';
+  for (const w of words) {
+    const test = line + w + ' ';
+    if (ctx.measureText(test).width > maxW) {
+      ctx.fillText(line, x, y);
+      line = w + ' ';
+      y += lineH;
+      if (y > cv.height - pad) break;
+    } else {
+      line = test;
+    }
+  }
+  if (y <= cv.height - pad) ctx.fillText(line, x, y);
+}
+
+function setupAudioVisualization(audio, canvas) {
+  let audioContext, analyser, source, rafId;
+  const initAudio = async () => {
+    try {
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.8;
+        source = audioContext.createMediaElementSource(audio);
+        source.connect(analyser);
+        source.connect(audioContext.destination);
+      }
+      if (audioContext.state === 'suspended') {
+        await audioContext.resume();
+      }
+    } catch (error) {
+      showToast('Audio context setup failed');
+    }
+  };
+  const dataArray = new Uint8Array(256);
+  const ctx = canvas.getContext('2d');
+  function draw() {
+    if (audio.paused) {
+      cancelAnimationFrame(rafId);
+      return;
+    }
+    rafId = requestAnimationFrame(draw);
+    if (!analyser) return;
+    analyser.getByteFrequencyData(dataArray);
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, 'rgba(11, 14, 24, 1)');
+    gradient.addColorStop(1, 'rgba(26, 33, 64, 1)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const barWidth = canvas.width / dataArray.length;
+    let x = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      const barHeight = (dataArray[i] / 255) * canvas.height * 0.8;
+      const hue = (i / dataArray.length) * 60 + 180;
+      const saturation = 70 + (dataArray[i] / 255) * 30;
+      const lightness = 40 + (dataArray[i] / 255) * 40;
+      ctx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      ctx.fillRect(x, canvas.height - barHeight, barWidth * 0.8, barHeight);
+      if (dataArray[i] > 100) {
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = `hsl(${hue}, ${saturation}%, ${lightness + 20}%)`;
+        ctx.fillRect(x, canvas.height - barHeight, barWidth * 0.8, barHeight);
+        ctx.shadowBlur = 0;
+      }
+      x += barWidth;
+    }
+  }
+  audio.addEventListener('play', () => { initAudio(); if (!rafId) draw(); });
+  audio.addEventListener('canplay', initAudio);
+  audio.addEventListener('pause', () => cancelAnimationFrame(rafId));
+}
+
+function handleBrowserInput() {
+  const input = urlInput.value.trim();
+  if (!input) return;
+  let url = input;
+  if (!input.match(/^https?:\/\//)) {
+    if (input.match(/^[a-zA-Z0-9-]+\.[a-zA-Z]{2,}$/)) {
+      url = `https://${input}`;
+    } else {
+      url = `https://duckduckgo.com/?q=${encodeURIComponent(input)}`;
+    }
+  }
+  loadMedia({ kind: 'browser', url });
+  browserOverlay.hidden = true;
+}
+
+function updateMediaButtons() {
+  const deck = state.decks[state.activeDeck];
+  const hasAudioVideo = ['video', 'audio'].includes(deck.media.kind);
+  btnPlayMedia.disabled = !hasAudioVideo;
+  btnPauseMedia.disabled = !hasAudioVideo;
+  btnUnmute.disabled = !hasAudioVideo;
+  btnOpenBrowser.disabled = deck.media.kind !== 'browser';
+}
+
+let voiceOn = !!state.speak;
+let humOn = !!state.hum;
+let ac, humGain;
+
+function ensureAudio() {
+  if (ac && ac.state !== 'closed') return ac;
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  humGain = ac.createGain();
+  humGain.gain.value = 0.0;
+  humGain.connect(ac.destination);
+  const osc = ac.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.value = 60;
+  const low = ac.createBiquadFilter();
+  low.type = 'lowpass';
+  low.frequency.value = 220;
+  low.Q.value = 2;
+  const lfo = ac.createOscillator();
+  lfo.frequency.value = 17;
+  const lfoGain = ac.createGain();
+  lfoGain.gain.value = 6;
+  lfo.connect(lfoGain).connect(low.detune);
+  osc.connect(low).connect(humGain);
+  osc.start();
+  lfo.start();
+  return ac;
+}
+
+function setHum(active) {
+  const audioCtx = ensureAudio();
+  humOn = active;
+  state.hum = active;
+  save();
+  const target = active ? 0.08 : 0.0;
+  if (audioCtx && humGain) {
+    const now = audioCtx.currentTime;
+    humGain.gain.cancelScheduledValues(now);
+    humGain.gain.linearRampToValueAtTime(target, now + 0.25);
+  }
+  btnHum.classList.toggle('active', active);
+}
+
+function setVoice(active) {
+  voiceOn = active;
+  state.speak = active;
+  save();
+  btnSpeak.classList.toggle('active', active);
+}
+
+function quip() {
+  if (!voiceOn || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const s = new SpeechSynthesisUtterance();
+  s.text = pick([
+    'Booting hologram. Smooth and luminous.',
+    'Guide mode engaged. How can I help?',
+    'Lightfield calibrated. Let us begin.',
+    'P.O.P.S. lineage acknowledged. Grandson online.',
+    'Browser panel loaded. Ready to explore.',
+    'Audio systems nominal. Crystal clear.',
+    'Holographic projection stable. All systems green.'
+  ]);
+  s.rate = 1.0;
+  s.pitch = 1.05;
+  s.volume = 0.8;
+  s.onstart = () => {
+    if (humOn && humGain && ac) {
+      const now = ac.currentTime;
+      humGain.gain.linearRampToValueAtTime(0.015, now + 0.05);
+    }
+  };
+  s.onend = () => {
+    if (humOn && humGain && ac) {
+      const now = ac.currentTime;
+      humGain.gain.linearRampToValueAtTime(0.08, now + 0.05);
+    }
+  };
+  window.speechSynthesis.speak(s);
+}
+
+function pick(a) {
+  return a[Math.floor(Math.random() * a.length)];
+}
+
+function toggleFocus() {
+  const deck = state.decks[state.activeDeck];
+  deck.focused = !deck.focused;
+  cubes[state.activeDeck].classList.toggle('focused', deck.focused);
+  btnFocus.classList.toggle('active', deck.focused);
+  save();
+}
+
+function toggleFullscreen() {
+  const deck = state.decks[state.activeDeck];
+  if (deck.media.kind === 'browser' && deck.media.url) {
+    window.open(deck.media.url, '_blank');
+    return;
+  }
+  if (state.fullscreen) {
+    state.fullscreen = false;
+    if (document.exitFullscreen) {
+      document.exitFullscreen().catch(() => showToast('Failed to exit fullscreen'));
+    }
+  } else if (deck.media.kind !== 'none') {
+    state.fullscreen = true;
+    if (['video', 'image'].includes(deck.media.kind) && deck.media.element) {
+      if (deck.media.element.requestFullscreen) {
+        deck.media.element.requestFullscreen().catch(() => showToast('Fullscreen unavailable'));
+      }
+    }
+  }
+  btnFull.classList.toggle('active', state.fullscreen);
+}
+
+function toggleOverview() {
+  state.overview = !state.overview;
+  btnOverview.classList.toggle('active', state.overview);
+  if (state.overview) {
+    enterOverview();
+  } else {
+    exitOverview();
+  }
+  save();
+}
+
+function enterOverview() {
+  const overviewSize = Math.min(200, (stage.clientWidth - 24 * (state.decks.length - 1)) / state.decks.length);
+  document.documentElement.style.setProperty('--overview-size', `${overviewSize}px`);
+  stage.classList.add('overview');
+  cubes.forEach(c => c.classList.remove('hidden'));
+  cubes.forEach((c, i) => {
+    c.onclick = () => {
+      switchDeck(i);
+      toggleOverview();
+    };
+  });
+  switchDeck(state.activeDeck); // Scrolls to active deck
+}
+
+function exitOverview() {
+  stage.classList.remove('overview');
+  cubes.forEach((c, i) => {
+    c.onclick = null;
+    if (i !== state.activeDeck) c.classList.add('hidden');
+    else c.classList.remove('hidden');
+  });
+  stage.scrollLeft = 0;
+}
+
+['dragenter', 'dragover'].forEach(evt => stage.addEventListener(evt, e => {
+  e.preventDefault();
+  drop.classList.add('show');
+}));
+['dragleave', 'drop'].forEach(evt => stage.addEventListener(evt, e => {
+  e.preventDefault();
+  if (evt === 'dragleave' && stage.contains(e.relatedTarget)) return;
+  drop.classList.remove('show');
+}));
+stage.addEventListener('drop', e => {
+  const files = [...e.dataTransfer.files];
+  if (files.length > 0) {
+    loadMediaFromFile(files[0]);
+  }
+});
+
+function loadMediaFromFile(file) {
+  const url = URL.createObjectURL(file);
+  let kind = 'unknown';
+  if (file.type.startsWith('image/')) kind = 'image';
+  else if (file.type.startsWith('video/')) kind = 'video';
+  else if (file.type.startsWith('audio/')) kind = 'audio';
+  else if (file.type === 'text/plain') kind = 'text';
+  else if (file.type === 'application/pdf') kind = 'pdf';
+  if (kind !== 'unknown') {
+    loadMedia({ kind, url });
+  } else {
+    showToast('Unsupported file type');
+  }
+}
+
+function boot() {
+  scan.classList.toggle('off', !state.scanlines);
+  btnScan.classList.toggle('active', state.scanlines);
+  layerSel.value = state.layer;
+  applyLayer();
+  setVoice(state.speak);
+  setHum(state.hum);
+  btnFull.classList.toggle('active', state.fullscreen);
+  btnOverview.classList.toggle('active', state.overview);
+  updateDeckUI();
+  updateMediaButtons();
+  cubes.forEach((cube, i) => {
+    setupCubeInteractions(cube, i);
+    const deck = state.decks[i];
+    cube.classList.toggle('glow', deck.glow);
+    cube.classList.toggle('focused', deck.focused);
+  });
+  if (state.overview) enterOverview();
+  last = performance.now();
+  cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(loop);
+}
+
+btnPlay.addEventListener('click', () => playToggle());
+btnGlow.addEventListener('click', () => {
+  const deck = state.decks[state.activeDeck];
+  deck.glow = !deck.glow;
+  cubes[state.activeDeck].classList.toggle('glow', deck.glow);
+  btnGlow.classList.toggle('active', deck.glow);
+  save();
+});
+btnScan.addEventListener('click', () => {
+  state.scanlines = !state.scanlines;
+  scan.classList.toggle('off', !state.scanlines);
+  btnScan.classList.toggle('active', state.scanlines);
+  save();
+});
+layerSel.addEventListener('change', () => {
+  state.layer = layerSel.value;
+  applyLayer();
+  save();
+});
+speed.addEventListener('input', () => {
+  state.decks[state.activeDeck].rotationSpeed = parseFloat(speed.value);
+  save();
+});
+btnAdd.addEventListener('click', () => picker.click());
+picker.addEventListener('change', () => {
+  if (picker.files.length > 0) {
+    loadMediaFromFile(picker.files[0]);
+    picker.value = '';
+  }
+});
+btnBrowser.addEventListener('click', () => {
+  loadMedia({ kind: 'browser', url: 'https://wikipedia.com' });
+});
+btnOpenBrowser.addEventListener('click', () => {
+  if (state.decks[state.activeDeck].media.kind === 'browser') {
+    browserOverlay.hidden = false;
+    urlInput.focus();
+  }
+});
+goBtn.addEventListener('click', handleBrowserInput);
+urlInput.addEventListener('keypress', e => {
+  if (e.key === 'Enter') handleBrowserInput();
+});
+cancelBrowserBtn.addEventListener('click', () => browserOverlay.hidden = true);
+btnPlayMedia.addEventListener('click', () => {
+  const deck = state.decks[state.activeDeck];
+  if (['video', 'audio'].includes(deck.media.kind) && deck.media.element) {
+    deck.media.element.play().catch(() => showToast('Failed to play media'));
+  }
+});
+btnPauseMedia.addEventListener('click', () => {
+  const deck = state.decks[state.activeDeck];
+  if (['video', 'audio'].includes(deck.media.kind) && deck.media.element) {
+    deck.media.element.pause();
+  }
+});
+btnUnmute.addEventListener('click', () => {
+  const deck = state.decks[state.activeDeck];
+  if (['video', 'audio'].includes(deck.media.kind) && deck.media.element) {
+    deck.media.element.muted = false;
+    ensureAudio();
+  }
+});
+btnSpeak.addEventListener('click', () => setVoice(!voiceOn));
+btnQuip.addEventListener('click', () => {
+  ensureAudio();
+  quip();
+});
+btnHum.addEventListener('click', () => setHum(!humOn));
+btnOverview.addEventListener('click', toggleOverview);
+btnFocus.addEventListener('click', toggleFocus);
+btnFull.addEventListener('click', toggleFullscreen);
+btnReset.addEventListener('click', () => {
+  const deck = state.decks[state.activeDeck];
+  if (deck.media.element && ['video', 'audio'].includes(deck.media.kind)) {
+    deck.media.element.pause();
+  }
+  state.decks[state.activeDeck] = {
+    rotationSpeed: 0.015,
+    rotating: true,
+    glow: true,
+    media: { kind: 'none', url: '', element: null },
+    zoom: 1,
+    rx: -18,
+    ry: 24,
+    focused: false,
+    volume: 0.7
+  };
+  state.scanlines = true;
+  state.layer = 'none';
+  state.speak = false;
+  state.hum = false;
+  state.fullscreen = false;
+  state.overview = false;
+  clearMedia();
+  boot();
+});
+addDeckBtn.addEventListener('click', addNewDeck);
+deckNav.addEventListener('click', e => {
+  const btn = e.target.closest('.deck-btn');
+  if (btn) switchDeck(parseInt(btn.dataset.deck));
+});
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) {
+    state.fullscreen = false;
+    btnFull.classList.remove('active');
+    save();
+  }
+});
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  switch (e.key) {
+    case ' ': e.preventDefault(); playToggle(); break;
+    case 'g': case 'G': btnGlow.click(); break;
+    case 's': case 'S': btnScan.click(); break;
+    case '+': case '=':
+      state.decks[state.activeDeck].rotationSpeed = Math.min(0.06, state.decks[state.activeDeck].rotationSpeed + 0.003);
+      speed.value = state.decks[state.activeDeck].rotationSpeed;
+      save();
+      break;
+    case '-': case '_':
+      state.decks[state.activeDeck].rotationSpeed = Math.max(0.0, state.decks[state.activeDeck].rotationSpeed - 0.003);
+      speed.value = state.decks[state.activeDeck].rotationSpeed;
+      save();
+      break;
+    case 'f': case 'F': btnFocus.click(); break;
+    case 'v': case 'V': btnSpeak.click(); break;
+    case 'o': case 'O': toggleOverview(); break;
+    case '1': case '2': case '3': case '4': case '5':
+      const deckIndex = parseInt(e.key) - 1;
+      if (deckIndex < state.decks.length) switchDeck(deckIndex);
+      break;
+  }
+});
+boot();
+setTimeout(() => {
+  if (state.speak) quip();
+  if (state.decks[state.activeDeck].media.kind === 'none') {
+    loadMedia({ kind: 'browser', url: 'https://wikipedia.com' });
+  }
+}, 800);
+</script>
+</body>
+</html>
